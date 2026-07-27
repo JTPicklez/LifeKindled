@@ -179,6 +179,12 @@ const AVATARS = [
   { id:'star',   emoji:'⭐', label:'Star'   },
   { id:'olive',  emoji:'🌿', label:'Olive'  },
   { id:'candle', emoji:'🕯️', label:'Candle' },
+  // creatures — cute, but each one carries Scripture behind it
+  { id:'lion',   emoji:'🦁', label:'Lion'      },  // Lion of Judah
+  { id:'deer',   emoji:'🦌', label:'Deer'      },  // Psalm 42
+  { id:'eagle',  emoji:'🦅', label:'Eagle'     },  // Isaiah 40:31
+  { id:'fish',   emoji:'🐟', label:'Fish'      },  // ichthys
+  { id:'wing',   emoji:'🦋', label:'Butterfly' },  // new creation
 ];
 const getAvatar = id => AVATARS.find(a => a.id === id) || AVATARS[0];
 
@@ -2715,19 +2721,11 @@ function NotificationsScreen({ user, onNav }) {
 //  PROFILE  —  the hub. Friends, Prayer, Study Rooms, History, Settings.
 // ═══════════════════════════════════════════════════════════════════
 
-function ProfileScreen({ user, onNav, onSignOut }) {
+function ProfileScreen({ user, onNav, onSignOut, stats }) {
   const { C } = useSettings();
   const [showAvatar, setShowAvatar] = useState(false);
   const [showQR, setShowQR]         = useState(false);
-  const [stats, setStats]           = useState({ chapters:0, highlights:0 });
   const fr = frameForStreak(user?.longestStreak || 0);
-
-  useEffect(() => {
-    if (!user?.uid) return;
-    getRecents().then(r => setStats(s => ({ ...s, chapters: r.length })));
-    const q = query(collection(db,'highlights'), where('userId','==',user.uid));
-    return onSnapshot(q, snap => setStats(s => ({ ...s, highlights: snap.size })), () => {});
-  }, [user?.uid]);
 
   const rows = [
     { id:'friends',   icon:'people-outline',       label:'Friends',        tone:'tide',
@@ -2948,6 +2946,12 @@ function FriendsScreen({ user, onBack, onNav }) {
             {(f.currentStreak || 0) > 0 && (
               <Text style={{ fontFamily:F.bold, fontSize:12.5, color:C.gold }}>🔥 {f.currentStreak}</Text>
             )}
+            <TouchableOpacity onPress={() => onNav('dm', { uid: f.uid })}
+              hitSlop={{top:10,bottom:10,left:10,right:10}}
+              style={{ padding:8, borderRadius:11, backgroundColor:C.gold + '12',
+                borderWidth:1, borderColor:C.gold + '33' }}>
+              <Ionicons name="chatbubble-outline" size={15} color={C.gold} />
+            </TouchableOpacity>
           </View>
         </Card>
       ))}
@@ -2958,11 +2962,12 @@ function FriendsScreen({ user, onBack, onNav }) {
 }
 
 // ─── PUBLIC PROFILE ────────────────────────────────────────────────
-function UserProfileScreen({ uid, user, onBack, onNav }) {
+function UserProfileScreen({ uid, user, groups, onBack, onNav }) {
   const { C } = useSettings();
   const [target, setTarget] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sent, setSent] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   const isFriend = (user?.friends || []).includes(uid);
   const isSelf   = uid === user?.uid;
@@ -3029,6 +3034,34 @@ function UserProfileScreen({ uid, user, onBack, onNav }) {
       <View style={{ marginTop:28 }}>
         {isSelf ? null : isFriend ? (
           <>
+            <View style={{ gap:8, marginBottom:18 }}>
+              {[
+                { id:'message', icon:'chatbubbles-outline', label:'Message',
+                  sub:'A quiet one-to-one conversation', tone:'gold',
+                  onPress: () => onNav('dm', { uid }) },
+                { id:'prayer',  icon:'hand-left-outline',   label:'Send a prayer request',
+                  sub:'Ask them to carry something with you', tone:'sage',
+                  onPress: () => onNav('dm', { uid, startPrayer:true }) },
+                { id:'group',   icon:'people-outline',      label:'Invite to a group',
+                  sub:'Bring them into one of your groups', tone:'tide',
+                  onPress: () => setShowInvite(true) },
+              ].map(a => (
+                <TouchableOpacity key={a.id} onPress={a.onPress}
+                  style={{ flexDirection:'row', alignItems:'center', gap:13, padding:15,
+                    borderRadius:15, backgroundColor:C.surface, borderWidth:1, borderColor:C.line }}>
+                  <View style={{ width:36, height:36, borderRadius:12, alignItems:'center',
+                    justifyContent:'center', backgroundColor: C[a.tone] + '16' }}>
+                    <Ionicons name={a.icon} size={17} color={C[a.tone]} />
+                  </View>
+                  <View style={{ flex:1 }}>
+                    <Text style={{ fontFamily:F.bold, fontSize:14.5, color:C.text }}>{a.label}</Text>
+                    <Text style={[S(C).muted, { fontSize:11.5, marginTop:2 }]}>{a.sub}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={C.dim} />
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <View style={[S(C).notice, { flexDirection:'row', alignItems:'center', gap:8,
               backgroundColor:C.sage + '10', borderColor:C.sage + '33', marginBottom:12 }]}>
               <Ionicons name="checkmark-circle" size={16} color={C.sage} />
@@ -3039,6 +3072,9 @@ function UserProfileScreen({ uid, user, onBack, onNav }) {
                 { text:'Cancel', style:'cancel' },
                 { text:'Remove', style:'destructive', onPress: async () => { await removeFriend(user.uid, uid); onBack(); } },
               ])} />
+
+            <InviteToGroupSheet visible={showInvite} friend={target} user={user}
+              groups={groups} onClose={() => setShowInvite(false)} />
           </>
         ) : sent ? (
           <View style={[S(C).notice, { flexDirection:'row', alignItems:'center', gap:8 }]}>
@@ -3176,6 +3212,9 @@ function PrayerScreen({ user, onBack, seedVerse }) {
           )}
         </Card>
       ))}
+
+      <View style={{ height:30 }} />
+      <WorshipPanel />
     </Screen>
   );
 }
@@ -3380,6 +3419,420 @@ function SettingsScreen({ user, onBack, onSignOut }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  DIRECT MESSAGES  —  quiet, one-to-one. no feed, no pressure.
+// ═══════════════════════════════════════════════════════════════════
+const convoId = (a, b) => [a, b].sort().join('__');
+
+async function sendDM(fromUser, toUid, text, type = 'text') {
+  const cid = convoId(fromUser.uid, toUid);
+  await setDoc(doc(db,'conversations',cid), {
+    id: cid, participants: [fromUser.uid, toUid].sort(),
+    lastMessage: type === 'prayer' ? `🙏 ${text}` : text,
+    lastFrom: fromUser.uid, lastAt: serverTimestamp(),
+  }, { merge: true });
+  await addDoc(collection(db,'directMessages'), {
+    convId: cid, fromUid: fromUser.uid, toUid,
+    fromName: fromUser.name, fromAvatarId: fromUser.avatarId,
+    text, type, prayedBy: [], createdAt: serverTimestamp(),
+  });
+  await pushNotification(toUid, {
+    type: type === 'prayer' ? 'prayerRequest' : 'message',
+    title: type === 'prayer' ? `${fromUser.name} asked for prayer` : `${fromUser.name} messaged you`,
+    body: text.length > 70 ? text.slice(0, 70) + '…' : text,
+    actorUid: fromUser.uid,
+  });
+}
+
+function DirectMessageScreen({ uid: otherUid, user, onBack }) {
+  const { C } = useSettings();
+  const [other, setOther] = useState(null);
+  const [msgs, setMsgs]   = useState([]);
+  const [text, setText]   = useState('');
+  const [mode, setMode]   = useState('text');   // text | prayer
+  const listRef = useRef(null);
+  const cid = user?.uid && otherUid ? convoId(user.uid, otherUid) : null;
+
+  useEffect(() => {
+    getDoc(doc(db,'users',otherUid)).then(s => s.exists() && setOther({ uid:otherUid, ...s.data() }));
+  }, [otherUid]);
+
+  useEffect(() => {
+    if (!cid) return;
+    const q = query(collection(db,'directMessages'), where('convId','==',cid),
+      orderBy('createdAt','asc'), limit(200));
+    return onSnapshot(q, s => setMsgs(s.docs.map(d => ({ id:d.id, ...d.data() }))), () => {});
+  }, [cid]);
+
+  async function send() {
+    const body = text.trim();
+    if (!body) return;
+    setText('');
+    try { await sendDM(user, otherUid, body, mode); setMode('text'); }
+    catch (e) { setText(body); Alert.alert('Could not send', e.message); }
+  }
+
+  async function togglePrayed(m) {
+    const has = (m.prayedBy || []).includes(user.uid);
+    try {
+      await updateDoc(doc(db,'directMessages',m.id), {
+        prayedBy: has ? arrayRemove(user.uid) : arrayUnion(user.uid),
+      });
+      Haptics.selectionAsync();
+    } catch {}
+  }
+
+  return (
+    <SafeAreaView style={S(C).safe} edges={['top']}>
+      <View style={{ flexDirection:'row', alignItems:'center', gap:12,
+        paddingHorizontal:18, paddingVertical:12,
+        borderBottomWidth:1, borderBottomColor:C.hairline }}>
+        <TouchableOpacity onPress={onBack} hitSlop={{top:12,bottom:12,left:12,right:12}}>
+          <Ionicons name="chevron-back" size={24} color={C.gold} />
+        </TouchableOpacity>
+        <Avatar user={other} size={38} />
+        <View style={{ flex:1 }}>
+          <Text style={{ fontFamily:F.heavy, fontSize:15, color:C.text }}>{other?.name || '…'}</Text>
+          {other?.username ? (
+            <Text style={[S(C).muted, { fontSize:11.5 }]}>@{other.username}</Text>
+          ) : null}
+        </View>
+      </View>
+
+      <KeyboardAvoidingView style={{ flex:1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={88}>
+        <FlatList
+          ref={listRef} data={msgs} keyExtractor={m => m.id}
+          contentContainerStyle={{ padding:18 }}
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated:true })}
+          ListEmptyComponent={
+            <Empty icon="💬" title="Say something"
+              body="Share a verse that hit you, ask how they're doing, or send a prayer request." />
+          }
+          renderItem={({ item: m }) => {
+            const mine   = m.fromUid === user?.uid;
+            const prayer = m.type === 'prayer';
+            const prayed = (m.prayedBy || []).includes(user?.uid);
+            return (
+              <View style={{ marginBottom:13, alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                <View style={{
+                  maxWidth:'82%',
+                  backgroundColor: prayer ? C.sage + '14' : (mine ? C.gold + '18' : C.surface),
+                  borderWidth:1,
+                  borderColor: prayer ? C.sage + '3D' : (mine ? C.gold + '33' : C.line),
+                  borderRadius:18, paddingHorizontal:14, paddingVertical:11,
+                }}>
+                  {prayer && (
+                    <View style={{ flexDirection:'row', alignItems:'center', gap:6, marginBottom:6 }}>
+                      <Ionicons name="hand-left" size={12} color={C.sage} />
+                      <Text style={{ fontFamily:F.heavy, fontSize:9.5, letterSpacing:1.2,
+                        color:C.sage, textTransform:'uppercase' }}>Prayer request</Text>
+                    </View>
+                  )}
+                  <Text style={{ fontFamily:F.body, fontSize:14.5, color:C.text, lineHeight:22 }}>
+                    {m.text}
+                  </Text>
+                  {prayer && !mine && (
+                    <TouchableOpacity onPress={() => togglePrayed(m)}
+                      style={{ flexDirection:'row', alignItems:'center', gap:6, marginTop:10,
+                        alignSelf:'flex-start', paddingVertical:6, paddingHorizontal:12,
+                        borderRadius:999, borderWidth:1,
+                        borderColor: prayed ? C.sage + '66' : C.line,
+                        backgroundColor: prayed ? C.sage + '18' : 'transparent' }}>
+                      <Text style={{ fontSize:12 }}>🙏</Text>
+                      <Text style={{ fontFamily:F.bold, fontSize:11.5,
+                        color: prayed ? C.sage : C.muted }}>
+                        {prayed ? 'Praying for you' : 'I\'m praying'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <Text style={{ fontFamily:F.body, fontSize:10, color:C.dim, marginTop:4 }}>
+                  {timeAgo(m.createdAt)}
+                </Text>
+              </View>
+            );
+          }}
+        />
+
+        {mode === 'prayer' && (
+          <View style={{ flexDirection:'row', alignItems:'center', gap:8,
+            marginHorizontal:14, marginBottom:8, paddingVertical:9, paddingHorizontal:13,
+            borderRadius:12, backgroundColor:C.sage + '12', borderWidth:1, borderColor:C.sage + '33' }}>
+            <Ionicons name="hand-left" size={14} color={C.sage} />
+            <Text style={{ flex:1, fontFamily:F.bold, fontSize:12, color:C.sage }}>
+              Sending as a prayer request
+            </Text>
+            <TouchableOpacity onPress={() => setMode('text')}>
+              <Ionicons name="close" size={15} color={C.sage} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={{ flexDirection:'row', gap:9, padding:14, alignItems:'flex-end',
+          borderTopWidth:1, borderTopColor:C.hairline, backgroundColor:C.deep }}>
+          <TouchableOpacity onPress={() => setMode(m => m === 'prayer' ? 'text' : 'prayer')}
+            style={{ width:44, height:44, borderRadius:15, alignItems:'center', justifyContent:'center',
+              backgroundColor: mode === 'prayer' ? C.sage + '20' : C.raised,
+              borderWidth:1, borderColor: mode === 'prayer' ? C.sage + '55' : C.line }}>
+            <Ionicons name="hand-left-outline" size={19}
+              color={mode === 'prayer' ? C.sage : C.muted} />
+          </TouchableOpacity>
+          <TextInput value={text} onChangeText={setText} multiline
+            style={[S(C).input, { flex:1, maxHeight:100, paddingVertical:12 }]}
+            placeholder={mode === 'prayer' ? 'What can they pray for?' : 'Message…'}
+            placeholderTextColor={C.dim} />
+          <TouchableOpacity onPress={send} disabled={!text.trim()}
+            style={{ width:44, height:44, borderRadius:15, alignItems:'center', justifyContent:'center',
+              backgroundColor: !text.trim() ? C.raised : (mode === 'prayer' ? C.sage : C.gold) }}>
+            <Ionicons name="arrow-up" size={20} color={text.trim() ? C.abyss : C.dim} />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+// ─── INVITE A FRIEND TO A GROUP ────────────────────────────────────
+function InviteToGroupSheet({ visible, friend, user, groups, onClose }) {
+  const { C } = useSettings();
+  const [sending, setSending] = useState(null);
+
+  // only groups you can actually invite into
+  const mine = (groups || []).filter(g =>
+    g.ownerUid === user?.uid || g.adminUID === user?.uid ||
+    (g.admins || []).includes(user?.uid) || (g.members || []).includes(user?.uid));
+
+  async function invite(g) {
+    setSending(g.id);
+    try {
+      await pushNotification(friend.uid, {
+        type:'groupInvite',
+        title:`${user.name} invited you to ${g.name}`,
+        body:`Join with code ${g.inviteCode}`,
+        actorUid: user.uid, groupId: g.id,
+      });
+      await sendDM(user, friend.uid,
+        `Come join ${g.name} on LifeKindled — the invite code is ${g.inviteCode}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onClose();
+      setTimeout(() => Alert.alert('Invite sent', `${friend.name} got an invite to ${g.name}.`), 300);
+    } catch (e) { Alert.alert('Could not send invite', e.message); }
+    setSending(null);
+  }
+
+  return (
+    <Sheet visible={visible} onClose={onClose} maxHeight="70%">
+      <Text style={S(C).sheetTitle}>Invite {friend?.name}</Text>
+      <Text style={[S(C).muted, { marginTop:6, marginBottom:18 }]}>
+        Pick a group. They'll get a message with the code.
+      </Text>
+      {!mine.length ? (
+        <Empty icon="⛪" title="No groups yet"
+          body="Create a group first, then you can invite friends into it." />
+      ) : (
+        <ScrollView style={{ maxHeight:340 }} showsVerticalScrollIndicator={false}>
+          {mine.map(g => (
+            <TouchableOpacity key={g.id} onPress={() => invite(g)} disabled={!!sending}
+              style={[S(C).card, { flexDirection:'row', alignItems:'center', gap:12, marginBottom:9 }]}>
+              <View style={{ width:40, height:40, borderRadius:14, alignItems:'center',
+                justifyContent:'center', backgroundColor:C.tide + '16' }}>
+                <Text style={{ fontSize:19 }}>{g.emoji || '⛪'}</Text>
+              </View>
+              <View style={{ flex:1 }}>
+                <Text style={{ fontFamily:F.heavy, fontSize:14, color:C.text }}>{g.name}</Text>
+                <Text style={[S(C).muted, { fontSize:11.5, marginTop:1 }]}>
+                  {(g.members || []).length} members
+                </Text>
+              </View>
+              {sending === g.id
+                ? <ActivityIndicator size="small" color={C.tide} />
+                : <Ionicons name="paper-plane-outline" size={17} color={C.tide} />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+    </Sheet>
+  );
+}
+
+// ─── PLAN INVITE ───────────────────────────────────────────────────
+function PlanInviteScreen({ plan, user, onBack }) {
+  const { C } = useSettings();
+  const [friends, setFriends] = useState([]);
+  const [sent, setSent]       = useState([]);
+  const code = plan?.inviteCode || plan?.id?.slice(0, 6).toUpperCase();
+
+  useEffect(() => {
+    const ids = user?.friends || [];
+    if (!ids.length) return;
+    Promise.all(ids.map(u => getDoc(doc(db,'users',u))))
+      .then(s => setFriends(s.filter(x => x.exists()).map(x => ({ uid:x.id, ...x.data() }))));
+  }, [user?.friends]);
+
+  async function invite(f) {
+    try {
+      await pushNotification(f.uid, {
+        type:'planInvite',
+        title:`${user.name} invited you to a reading plan`,
+        body: plan.title, actorUid:user.uid, planId:plan.id,
+      });
+      await sendDM(user, f.uid, `Read "${plan.title}" with me on LifeKindled?`);
+      setSent(s => [...s, f.uid]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) { Alert.alert('Could not invite', e.message); }
+  }
+
+  return (
+    <Screen scroll>
+      <Header title="Invite to plan" onBack={onBack} sub={plan?.title} />
+
+      <View style={{ alignItems:'center', marginBottom:26 }}>
+        <View style={{ padding:18, backgroundColor:'#FFFFFF', borderRadius:22 }}>
+          <QRCode value={`lk://plan/${plan?.id}`} size={172}
+            color="#0B1524" backgroundColor="#FFFFFF" />
+        </View>
+        <Text style={[S(C).muted, { marginTop:14, textAlign:'center', maxWidth:250, lineHeight:20 }]}>
+          Have someone scan this to join the plan. Works great in a room full of people.
+        </Text>
+      </View>
+
+      <Section tone="gold">Or share the code</Section>
+      <Card tone="gold" style={{ marginBottom:24 }}>
+        <View style={{ flexDirection:'row', alignItems:'center', gap:12 }}>
+          <Text style={{ flex:1, fontFamily:F.black, fontSize:21, color:C.gold, letterSpacing:3 }}>
+            {code}
+          </Text>
+          <TouchableOpacity
+            onPress={async () => {
+              await Clipboard.setStringAsync(`Join "${plan.title}" on LifeKindled — code ${code}`);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              Alert.alert('Copied', 'Invite text is on your clipboard.');
+            }}
+            style={{ padding:11, borderRadius:12, backgroundColor:C.gold + '18' }}>
+            <Ionicons name="copy-outline" size={18} color={C.gold} />
+          </TouchableOpacity>
+        </View>
+      </Card>
+
+      <Section tone="tide">Invite friends directly</Section>
+      {!friends.length ? (
+        <Empty icon="👥" title="No friends yet"
+          body="Once you connect with people, you can invite them here in one tap." />
+      ) : friends.map(f => {
+        const done = sent.includes(f.uid);
+        return (
+          <Card key={f.uid} style={{ marginBottom:8 }}>
+            <View style={{ flexDirection:'row', alignItems:'center', gap:12 }}>
+              <Avatar user={f} size={38} />
+              <View style={{ flex:1 }}>
+                <Text style={{ fontFamily:F.heavy, fontSize:14, color:C.text }}>{f.name}</Text>
+                {f.username ? <Text style={[S(C).muted, { fontSize:11.5 }]}>@{f.username}</Text> : null}
+              </View>
+              <TouchableOpacity onPress={() => !done && invite(f)} disabled={done}
+                style={{ paddingVertical:8, paddingHorizontal:15, borderRadius:999,
+                  borderWidth:1, borderColor: done ? C.sage + '55' : C.tide + '55',
+                  backgroundColor: done ? C.sage + '14' : C.tide + '12' }}>
+                <Text style={{ fontFamily:F.bold, fontSize:12,
+                  color: done ? C.sage : C.tide }}>{done ? 'Sent' : 'Invite'}</Text>
+              </TouchableOpacity>
+            </View>
+          </Card>
+        );
+      })}
+    </Screen>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  WORSHIP  —  curated playlists that open in the app they already have.
+//  No OAuth, no Premium requirement, and the curation stays ours.
+// ═══════════════════════════════════════════════════════════════════
+const WORSHIP = [
+  { id:'still',   title:'Be Still',        blurb:'Quiet instrumental for prayer and journaling', emoji:'🕊️', tone:'tide',
+    spotify:'https://open.spotify.com/search/instrumental%20worship',
+    apple:'https://music.apple.com/us/search?term=instrumental%20worship',
+    youtube:'https://www.youtube.com/results?search_query=instrumental+worship+piano' },
+  { id:'morning', title:'Morning Light',   blurb:'Start the day with Scripture on your lips', emoji:'🌅', tone:'gold',
+    spotify:'https://open.spotify.com/search/morning%20worship',
+    apple:'https://music.apple.com/us/search?term=morning%20worship',
+    youtube:'https://www.youtube.com/results?search_query=morning+worship+songs' },
+  { id:'heavy',   title:'When It\'s Heavy', blurb:'For the days that are hard to carry', emoji:'🌧️', tone:'amethyst',
+    spotify:'https://open.spotify.com/search/worship%20for%20hard%20times',
+    apple:'https://music.apple.com/us/search?term=worship%20for%20hard%20times',
+    youtube:'https://www.youtube.com/results?search_query=worship+songs+for+hard+times' },
+  { id:'loud',    title:'Sing It Loud',    blurb:'Full-volume praise', emoji:'🔥', tone:'ember',
+    spotify:'https://open.spotify.com/search/christian%20praise',
+    apple:'https://music.apple.com/us/search?term=christian%20praise',
+    youtube:'https://www.youtube.com/results?search_query=christian+praise+songs' },
+  { id:'psalms',  title:'Psalms Set to Music', blurb:'Scripture sung straight through', emoji:'📜', tone:'sage',
+    spotify:'https://open.spotify.com/search/psalms%20sung',
+    apple:'https://music.apple.com/us/search?term=psalms%20sung',
+    youtube:'https://www.youtube.com/results?search_query=psalms+set+to+music' },
+];
+
+function WorshipPanel() {
+  const { C } = useSettings();
+  const [open, setOpen] = useState(null);
+
+  async function launch(url) {
+    try {
+      const { Linking } = require('react-native');
+      await Linking.openURL(url);
+    } catch { Alert.alert('Could not open', 'Try installing the app first.'); }
+  }
+
+  return (
+    <View>
+      <Section tone="amethyst">Worship while you pray</Section>
+      <Text style={[S(C).muted, { marginBottom:14, lineHeight:19 }]}>
+        Opens in whichever music app you already use.
+      </Text>
+      {WORSHIP.map(w => {
+        const on = open === w.id;
+        return (
+          <View key={w.id} style={{ marginBottom:9 }}>
+            <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setOpen(on ? null : w.id); }}
+              style={[S(C).card, { flexDirection:'row', alignItems:'center', gap:12,
+                borderColor: on ? C[w.tone] + '4D' : C.line,
+                backgroundColor: on ? C[w.tone] + '0C' : C.surface }]}>
+              <View style={{ width:40, height:40, borderRadius:14, alignItems:'center',
+                justifyContent:'center', backgroundColor: C[w.tone] + '16' }}>
+                <Text style={{ fontSize:19 }}>{w.emoji}</Text>
+              </View>
+              <View style={{ flex:1 }}>
+                <Text style={{ fontFamily:F.heavy, fontSize:14, color: on ? C[w.tone] : C.text }}>
+                  {w.title}
+                </Text>
+                <Text style={[S(C).muted, { fontSize:11.5, marginTop:2 }]}>{w.blurb}</Text>
+              </View>
+              <Ionicons name={on ? 'chevron-up' : 'chevron-down'} size={16} color={C.dim} />
+            </TouchableOpacity>
+
+            {on && (
+              <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
+                {[
+                  { l:'Spotify', u:w.spotify, i:'musical-notes-outline' },
+                  { l:'Apple',   u:w.apple,   i:'logo-apple'            },
+                  { l:'YouTube', u:w.youtube, i:'logo-youtube'          },
+                ].map(s => (
+                  <TouchableOpacity key={s.l} onPress={() => launch(s.u)}
+                    style={{ flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center',
+                      gap:6, paddingVertical:11, borderRadius:12,
+                      backgroundColor:C.raised, borderWidth:1, borderColor:C.line }}>
+                    <Ionicons name={s.i} size={14} color={C.muted} />
+                    <Text style={{ fontFamily:F.bold, fontSize:12, color:C.text }}>{s.l}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  SIGN IN
 // ═══════════════════════════════════════════════════════════════════
 function SignInScreen() {
@@ -3408,12 +3861,12 @@ function SignInScreen() {
       else       await signInWithEmailAndPassword(auth, email.trim(), pw);
     } catch (e) {
       const msg =
-        e.code === 'auth/user-not-found'       ? 'No account with that email.' :
-        e.code === 'auth/wrong-password'       ? 'That password doesn\'t match.' :
-        e.code === 'auth/invalid-credential'   ? 'Email or password is incorrect.' :
-        e.code === 'auth/email-already-in-use' ? 'An account already exists with that email.' :
-        e.code === 'auth/invalid-email'        ? 'That email doesn\'t look right.' :
-        e.code === 'auth/weak-password'        ? 'Pick a stronger password.' :
+        e.code === 'auth/user-not-found'         ? 'No account with that email.' :
+        e.code === 'auth/wrong-password'         ? 'That password doesn\'t match.' :
+        e.code === 'auth/invalid-credential'     ? 'Email or password is incorrect.' :
+        e.code === 'auth/email-already-in-use'   ? 'An account already exists with that email.' :
+        e.code === 'auth/invalid-email'          ? 'That email doesn\'t look right.' :
+        e.code === 'auth/weak-password'          ? 'Pick a stronger password.' :
         e.code === 'auth/network-request-failed' ? 'Network trouble — check your connection.' :
         'Something went wrong. Try again.';
       Alert.alert('Couldn\'t sign in', msg);
@@ -3425,11 +3878,10 @@ function SignInScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{ flex:1, justifyContent:'center', paddingHorizontal:32 }}>
         <View style={{ alignItems:'center', marginBottom:44 }}>
-          <Image source={require('./assets/icon.png')}
-            style={{ width:76, height:76, borderRadius:22 }} />
+          <Image source={require('./assets/icon.png')} style={{ width:76, height:76, borderRadius:22 }} />
           <Text style={{ fontFamily:F.display, fontSize:36, color:C.text, marginTop:20 }}>LifeKindled</Text>
           <View style={{ height:1, width:58, backgroundColor:C.gold + '66', marginTop:12 }} />
-          <Text style={{ fontFamily:F.scriptureItal, fontSize:14, color:C.muted, marginTop:12, textAlign:'center' }}>
+          <Text style={{ fontFamily:F.scriptureItal, fontSize:14, color:C.muted, marginTop:12 }}>
             A Bible built for community
           </Text>
         </View>
@@ -3476,8 +3928,193 @@ function SignInScreen() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  ONBOARDING  —  personal first. community when ready.
+//  ONBOARDING
+//  Setup is short. The tour explains what everything actually is —
+//  nobody should have to guess what "Shared View" means.
 // ═══════════════════════════════════════════════════════════════════
+const TOUR = [
+  {
+    id:'personal', emoji:'📖', tone:'gold',
+    title:'This is your Bible.',
+    lines:[
+      'Open the app and you land right where you left off — no home screen in the way.',
+      'Tap any verse to highlight it, or write a private note only you will ever see.',
+    ],
+    demo:'verse',
+  },
+  {
+    id:'shared', emoji:'👥', tone:'tide',
+    title:'Two ways to read.',
+    lines:[
+      'Personal shows your highlights and your private notes.',
+      'Shared overlays what other people wrote on the same verse — friends, your group, or the wider community.',
+      'The Scripture never changes. Only the layer over it does.',
+    ],
+    demo:'toggle',
+  },
+  {
+    id:'notes', emoji:'🔒', tone:'muted',
+    title:'Notes stay private. Always.',
+    lines:[
+      'A note is between you and God. Nothing you write there is ever visible to anyone else.',
+      'Sharing a thought is a separate action — and you pick exactly who sees it.',
+    ],
+    demo:'visibility',
+  },
+  {
+    id:'plans', emoji:'📚', tone:'gold',
+    title:'Reading plans give you a path.',
+    lines:[
+      'Pick a book, pick your rhythm, and the plan builds itself in under a minute.',
+      'Read it alone, or invite friends and a whole group to walk through it with you.',
+    ],
+    demo:'plan',
+  },
+  {
+    id:'groups', emoji:'⛪', tone:'tide',
+    title:'Groups are where people gather.',
+    lines:[
+      'Your youth group, small group, family, or just a few friends.',
+      'Each one has its own plans, chat, prayer requests, and members.',
+    ],
+    demo:'group',
+  },
+  {
+    id:'prayer', emoji:'🙏', tone:'sage',
+    title:'Prayer belongs here too.',
+    lines:[
+      'Save prayers privately, mark them answered, and pray straight from any verse.',
+      'Send a request to a friend and they can quietly let you know they\'re praying.',
+    ],
+    demo:'prayer',
+  },
+  {
+    id:'friends', emoji:'📷', tone:'amethyst',
+    title:'Connecting takes one scan.',
+    lines:[
+      'Everyone has a code on their profile. Scan theirs, they scan yours, done.',
+      'Friendships are mutual — both people say yes. There are no followers here.',
+    ],
+    demo:'qr',
+  },
+];
+
+function TourDemo({ kind }) {
+  const { C } = useSettings();
+
+  if (kind === 'verse') return (
+    <View style={[S(C).card, { paddingVertical:18 }]}>
+      <View style={{ flexDirection:'row', gap:10 }}>
+        <Text style={{ fontFamily:F.heavy, fontSize:10, color:C.gold, paddingTop:5 }}>16</Text>
+        <Text style={{ flex:1, fontFamily:F.scripture, fontSize:15, color:C.parchment, lineHeight:26 }}>
+          For this is how God loved the world…
+        </Text>
+      </View>
+      <View style={{ flexDirection:'row', gap:9, marginTop:14 }}>
+        {HIGHLIGHT_COLORS.map(h => (
+          <View key={h.color} style={{ width:26, height:26, borderRadius:13, backgroundColor:h.color }} />
+        ))}
+      </View>
+    </View>
+  );
+
+  if (kind === 'toggle') return (
+    <View style={{ flexDirection:'row', backgroundColor:C.raised, borderRadius:12,
+      padding:3, borderWidth:1, borderColor:C.line }}>
+      {[
+        { l:'Personal', i:'book-outline',   t:C.gold, on:true  },
+        { l:'Shared',   i:'people-outline', t:C.tide, on:false },
+      ].map(x => (
+        <View key={x.l} style={{ flex:1, flexDirection:'row', alignItems:'center',
+          justifyContent:'center', gap:6, paddingVertical:10, borderRadius:10,
+          backgroundColor: x.on ? x.t + '1C' : 'transparent',
+          borderWidth:1, borderColor: x.on ? x.t + '4D' : 'transparent' }}>
+          <Ionicons name={x.i} size={14} color={x.on ? x.t : C.dim} />
+          <Text style={{ fontFamily:F.bold, fontSize:12.5, color: x.on ? x.t : C.dim }}>{x.l}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  if (kind === 'visibility') return (
+    <View style={{ flexDirection:'row', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
+      {VISIBILITY.map(v => (
+        <View key={v.id} style={{ flexDirection:'row', alignItems:'center', gap:6,
+          paddingVertical:7, paddingHorizontal:12, borderRadius:999,
+          borderWidth:1, borderColor: (C[v.tone] || C.muted) + '4D',
+          backgroundColor: (C[v.tone] || C.muted) + '12' }}>
+          <Ionicons name={v.icon} size={12} color={C[v.tone] || C.muted} />
+          <Text style={{ fontFamily:F.bold, fontSize:11.5, color:C[v.tone] || C.muted }}>{v.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  if (kind === 'plan') return (
+    <View style={[S(C).card, { paddingVertical:16 }]}>
+      {[
+        { d:'1', p:'John 1', done:true  },
+        { d:'2', p:'John 2', done:true  },
+        { d:'3', p:'John 3', done:false },
+      ].map(r => (
+        <View key={r.d} style={{ flexDirection:'row', alignItems:'center', gap:11, marginBottom:9 }}>
+          <View style={{ width:26, height:26, borderRadius:9, alignItems:'center', justifyContent:'center',
+            backgroundColor: r.done ? C.sage : C.raised,
+            borderWidth: r.done ? 0 : 1, borderColor:C.line }}>
+            {r.done ? <Ionicons name="checkmark" size={14} color={C.abyss} />
+              : <Text style={{ fontFamily:F.heavy, fontSize:10, color:C.muted }}>{r.d}</Text>}
+          </View>
+          <Text style={{ fontFamily:F.bold, fontSize:13.5,
+            color: r.done ? C.muted : C.text,
+            textDecorationLine: r.done ? 'line-through' : 'none' }}>{r.p}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  if (kind === 'group') return (
+    <View style={{ flexDirection:'row', flexWrap:'wrap', gap:8, justifyContent:'center' }}>
+      {[
+        { l:'Plans',   i:'book-outline'        },
+        { l:'Chat',    i:'chatbubbles-outline' },
+        { l:'Prayer',  i:'hand-left-outline'   },
+        { l:'Members', i:'people-outline'      },
+      ].map(x => (
+        <View key={x.l} style={{ flexDirection:'row', alignItems:'center', gap:6,
+          paddingVertical:8, paddingHorizontal:13, borderRadius:999,
+          borderWidth:1, borderColor:C.tide + '4D', backgroundColor:C.tide + '12' }}>
+          <Ionicons name={x.i} size={13} color={C.tide} />
+          <Text style={{ fontFamily:F.bold, fontSize:12, color:C.tide }}>{x.l}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  if (kind === 'prayer') return (
+    <View style={[S(C).card, { borderLeftWidth:3, borderLeftColor:C.sage }]}>
+      <Text style={{ fontFamily:F.body, fontSize:13.5, color:C.text, lineHeight:21 }}>
+        Praying for my grandma's surgery Thursday.
+      </Text>
+      <View style={{ flexDirection:'row', alignItems:'center', gap:6, marginTop:11,
+        alignSelf:'flex-start', paddingVertical:6, paddingHorizontal:12, borderRadius:999,
+        borderWidth:1, borderColor:C.sage + '66', backgroundColor:C.sage + '18' }}>
+        <Text style={{ fontSize:12 }}>🙏</Text>
+        <Text style={{ fontFamily:F.bold, fontSize:11.5, color:C.sage }}>3 praying</Text>
+      </View>
+    </View>
+  );
+
+  if (kind === 'qr') return (
+    <View style={{ alignItems:'center' }}>
+      <View style={{ padding:14, backgroundColor:'#FFFFFF', borderRadius:18 }}>
+        <QRCode value="lk://user/demo" size={104} color="#0B1524" backgroundColor="#FFFFFF" />
+      </View>
+    </View>
+  );
+
+  return null;
+}
+
 function Onboarding({ firebaseUser, onDone }) {
   const { C } = useSettings();
   const [step, setStep]   = useState(0);
@@ -3486,13 +4123,14 @@ function Onboarding({ firebaseUser, onDone }) {
   const [avail, setAvail] = useState(null);
   const [checking, setCk] = useState(false);
   const [avatarId, setAv] = useState('flame');
+  const [tour, setTour]   = useState(0);
   const [saving, setSav]  = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     fade.setValue(0);
-    Animated.timing(fade, { toValue:1, duration:380, useNativeDriver:true }).start();
-  }, [step]);
+    Animated.timing(fade, { toValue:1, duration:340, useNativeDriver:true }).start();
+  }, [step, tour]);
 
   useEffect(() => {
     if (uname.length < 3) { setAvail(null); return; }
@@ -3502,7 +4140,7 @@ function Onboarding({ firebaseUser, onDone }) {
     return () => clearTimeout(t);
   }, [uname]);
 
-  async function finish(joinLater) {
+  async function finish() {
     setSav(true);
     try {
       await setDoc(doc(db,'users',firebaseUser.uid), {
@@ -3515,143 +4153,194 @@ function Onboarding({ firebaseUser, onDone }) {
       });
       if (uname) await claimUsername(uname, firebaseUser.uid);
       const s = await getDoc(doc(db,'users',firebaseUser.uid));
-      onDone(s.exists() ? s.data() : { uid:firebaseUser.uid, name, username:uname, avatarId });
+      onDone(s.exists() ? { uid:firebaseUser.uid, ...s.data() }
+                        : { uid:firebaseUser.uid, name, username:uname, avatarId });
     } catch (e) { Alert.alert('Could not finish setup', e.message); setSav(false); }
   }
 
-  // 0 — welcome
+  // ── 0 · welcome ──
   if (step === 0) return (
-    <View style={{ flex:1, backgroundColor:C.abyss, justifyContent:'center', paddingHorizontal:34 }}>
-      <Animated.View style={{ flex:1, opacity:fade }}>
-        <View style={{ flex:1, justifyContent:'center' }}>
-          <Image source={require('./assets/icon.png')}
-            style={{ width:70, height:70, borderRadius:21, marginBottom:30 }} />
-          <Text style={{ fontFamily:F.display, fontSize:36, color:C.text, lineHeight:44 }}>
-            The Bible{'\n'}is the campfire.
-          </Text>
-          <View style={{ height:1, width:58, backgroundColor:C.gold + '66', marginTop:18, marginBottom:18 }} />
-          <Text style={{ fontFamily:F.body, fontSize:15.5, color:C.muted, lineHeight:25 }}>
-            People gather around it. They ask questions, encourage each other, and sit with what they read.
-            {'\n\n'}Everything in LifeKindled exists to help you gather around God's Word — never to compete with it.
-          </Text>
-          <GoldButton label="Let's begin" onPress={() => setStep(1)} style={{ marginTop:40 }} />
-        </View>
+    <View style={{ flex:1, backgroundColor:C.abyss, paddingHorizontal:34 }}>
+      <Animated.View style={{ flex:1, justifyContent:'center', opacity:fade }}>
+        <Image source={require('./assets/icon.png')}
+          style={{ width:70, height:70, borderRadius:21, marginBottom:30 }} />
+        <Text style={{ fontFamily:F.display, fontSize:36, color:C.text, lineHeight:44 }}>
+          The Bible{'\n'}is the campfire.
+        </Text>
+        <View style={{ height:1, width:58, backgroundColor:C.gold + '66', marginTop:18, marginBottom:18 }} />
+        <Text style={{ fontFamily:F.body, fontSize:15.5, color:C.muted, lineHeight:25 }}>
+          People gather around it. They ask questions, encourage each other, and sit with what they read.
+          {'\n\n'}Everything in LifeKindled exists to help you gather around God's Word — never to compete with it.
+        </Text>
+        <GoldButton label="Let's begin" onPress={() => setStep(1)} style={{ marginTop:40 }} />
       </Animated.View>
     </View>
   );
 
-  // 1 — name
+  // ── 1 · name ──
   if (step === 1) return (
     <KeyboardAvoidingView style={{ flex:1, backgroundColor:C.abyss }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <Animated.View style={{ flex:1, opacity:fade }}>
-        <View style={{ flex:1, justifyContent:'center', paddingHorizontal:34 }}>
-          <Text style={S(C).step}>Step 1 of 3</Text>
-          <Text style={{ fontFamily:F.display, fontSize:33, color:C.text, marginTop:14 }}>
-            What should we call you?
-          </Text>
-          <Text style={[S(C).muted, { marginTop:12, marginBottom:28, lineHeight:21 }]}>
-            This is how friends will recognize you.
-          </Text>
-          <TextInput value={name} onChangeText={setName} autoFocus autoCapitalize="words"
-            style={[S(C).input, { fontSize:19, paddingVertical:17, textAlign:'center', fontFamily:F.bold }]}
-            placeholder="Your name" placeholderTextColor={C.dim}
-            onSubmitEditing={() => name.trim() && setStep(2)} />
-          <GoldButton label="Continue" onPress={() => name.trim() && setStep(2)}
-            disabled={!name.trim()} style={{ marginTop:22 }} />
-        </View>
+      <Animated.View style={{ flex:1, justifyContent:'center', paddingHorizontal:34, opacity:fade }}>
+        <Text style={S(C).step}>Step 1 of 3</Text>
+        <Text style={{ fontFamily:F.display, fontSize:33, color:C.text, marginTop:14 }}>
+          What should we call you?
+        </Text>
+        <Text style={[S(C).muted, { marginTop:12, marginBottom:28, lineHeight:21 }]}>
+          This is how friends will recognize you.
+        </Text>
+        <TextInput value={name} onChangeText={setName} autoFocus autoCapitalize="words"
+          style={[S(C).input, { fontSize:19, paddingVertical:17, textAlign:'center', fontFamily:F.bold }]}
+          placeholder="Your name" placeholderTextColor={C.dim}
+          onSubmitEditing={() => name.trim() && setStep(2)} />
+        <GoldButton label="Continue" onPress={() => name.trim() && setStep(2)}
+          disabled={!name.trim()} style={{ marginTop:22 }} />
       </Animated.View>
     </KeyboardAvoidingView>
   );
 
-  // 2 — username
-  if (step === 2) {
-    const valid = usernameValid(uname);
-    return (
-      <KeyboardAvoidingView style={{ flex:1, backgroundColor:C.abyss }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Animated.View style={{ flex:1, opacity:fade }}>
-          <View style={{ flex:1, justifyContent:'center', paddingHorizontal:34 }}>
-            <Text style={S(C).step}>Step 2 of 3</Text>
-            <Text style={{ fontFamily:F.display, fontSize:33, color:C.text, marginTop:14 }}>
-              Pick a username.
-            </Text>
-            <Text style={[S(C).muted, { marginTop:12, marginBottom:26, lineHeight:21 }]}>
-              How people find you without sharing anything personal. Letters, numbers, dots, underscores.
-            </Text>
-            <View style={{ flexDirection:'row', alignItems:'center', paddingHorizontal:16,
-              borderRadius:14, backgroundColor:C.surface, borderWidth:1.5,
-              borderColor: avail === false ? C.rose : avail === true ? C.sage : C.line }}>
-              <Text style={{ fontFamily:F.bold, fontSize:19, color:C.gold }}>@</Text>
-              <TextInput value={uname} autoCapitalize="none" autoCorrect={false} maxLength={20}
-                onChangeText={t => setUname(t.replace(/[^a-zA-Z0-9_.]/g,'').toLowerCase())}
-                style={{ flex:1, paddingVertical:16, fontFamily:F.bold, fontSize:19, color:C.text }}
-                placeholder="yourname" placeholderTextColor={C.dim} />
-              {checking && <ActivityIndicator size="small" color={C.gold} />}
-              {!checking && avail === true  && <Ionicons name="checkmark-circle" size={21} color={C.sage} />}
-              {!checking && avail === false && <Ionicons name="close-circle" size={21} color={C.rose} />}
-            </View>
-            {avail === false && (
-              <Text style={{ fontFamily:F.bold, fontSize:12, color:C.rose, marginTop:9 }}>
-                Taken — try another.
-              </Text>
-            )}
-            {avail === true && (
-              <Text style={{ fontFamily:F.bold, fontSize:12, color:C.sage, marginTop:9 }}>
-                @{uname} is yours.
-              </Text>
-            )}
-            <GoldButton label="Continue" onPress={() => setStep(3)}
-              disabled={!(avail && valid)} style={{ marginTop:22 }} />
-            <TouchableOpacity onPress={() => { setUname(''); setStep(3); }}
-              style={{ marginTop:16, alignItems:'center' }}>
-              <Text style={[S(C).muted, { fontSize:13.5 }]}>Skip for now</Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </KeyboardAvoidingView>
-    );
-  }
+  // ── 2 · username ──
+  if (step === 2) return (
+    <KeyboardAvoidingView style={{ flex:1, backgroundColor:C.abyss }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <Animated.View style={{ flex:1, justifyContent:'center', paddingHorizontal:34, opacity:fade }}>
+        <Text style={S(C).step}>Step 2 of 3</Text>
+        <Text style={{ fontFamily:F.display, fontSize:33, color:C.text, marginTop:14 }}>
+          Pick a username.
+        </Text>
+        <Text style={[S(C).muted, { marginTop:12, marginBottom:26, lineHeight:21 }]}>
+          How people find you without sharing anything personal. Letters, numbers, dots, underscores.
+        </Text>
+        <View style={{ flexDirection:'row', alignItems:'center', paddingHorizontal:16,
+          borderRadius:14, backgroundColor:C.surface, borderWidth:1.5,
+          borderColor: avail === false ? C.rose : avail === true ? C.sage : C.line }}>
+          <Text style={{ fontFamily:F.bold, fontSize:19, color:C.gold }}>@</Text>
+          <TextInput value={uname} autoCapitalize="none" autoCorrect={false} maxLength={20}
+            onChangeText={t => setUname(t.replace(/[^a-zA-Z0-9_.]/g,'').toLowerCase())}
+            style={{ flex:1, paddingVertical:16, fontFamily:F.bold, fontSize:19, color:C.text }}
+            placeholder="yourname" placeholderTextColor={C.dim} />
+          {checking && <ActivityIndicator size="small" color={C.gold} />}
+          {!checking && avail === true  && <Ionicons name="checkmark-circle" size={21} color={C.sage} />}
+          {!checking && avail === false && <Ionicons name="close-circle" size={21} color={C.rose} />}
+        </View>
+        {avail === false && (
+          <Text style={{ fontFamily:F.bold, fontSize:12, color:C.rose, marginTop:9 }}>
+            Taken — try another.
+          </Text>
+        )}
+        {avail === true && (
+          <Text style={{ fontFamily:F.bold, fontSize:12, color:C.sage, marginTop:9 }}>
+            @{uname} is yours.
+          </Text>
+        )}
+        <GoldButton label="Continue" onPress={() => setStep(3)}
+          disabled={!(avail && usernameValid(uname))} style={{ marginTop:22 }} />
+        <TouchableOpacity onPress={() => { setUname(''); setStep(3); }}
+          style={{ marginTop:16, alignItems:'center' }}>
+          <Text style={[S(C).muted, { fontSize:13.5 }]}>Skip for now</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </KeyboardAvoidingView>
+  );
 
-  // 3 — avatar
+  // ── 3 · avatar ──
   if (step === 3) return (
-    <View style={{ flex:1, backgroundColor:C.abyss, paddingHorizontal:30, paddingTop:74 }}>
+    <View style={{ flex:1, backgroundColor:C.abyss, paddingHorizontal:30, paddingTop:70 }}>
       <Animated.View style={{ flex:1, opacity:fade }}>
         <Text style={S(C).step}>Step 3 of 3</Text>
         <Text style={{ fontFamily:F.display, fontSize:33, color:C.text, marginTop:14 }}>
           Choose your avatar.
         </Text>
         <Text style={[S(C).muted, { marginTop:12, lineHeight:21 }]}>
-          You can change it any time.
+          Change it any time from your profile.
         </Text>
-        <View style={{ alignItems:'center', marginVertical:26 }}>
-          <View style={{ width:88, height:88, borderRadius:29, alignItems:'center', justifyContent:'center',
+        <View style={{ alignItems:'center', marginVertical:22 }}>
+          <View style={{ width:84, height:84, borderRadius:28, alignItems:'center', justifyContent:'center',
             backgroundColor:C.raised, borderWidth:2, borderColor:C.gold }}>
-            <Text style={{ fontSize:42 }}>{getAvatar(avatarId).emoji}</Text>
+            <Text style={{ fontSize:40 }}>{getAvatar(avatarId).emoji}</Text>
           </View>
           <Text style={[S(C).muted, { marginTop:10 }]}>{name}</Text>
         </View>
         <ScrollView showsVerticalScrollIndicator={false}>
-          <View style={{ flexDirection:'row', flexWrap:'wrap', gap:12, justifyContent:'center' }}>
+          <View style={{ flexDirection:'row', flexWrap:'wrap', gap:11, justifyContent:'center' }}>
             {AVATARS.map(a => {
               const on = avatarId === a.id;
               return (
                 <TouchableOpacity key={a.id}
                   onPress={() => { Haptics.selectionAsync(); setAv(a.id); }}
-                  style={{ width:62, height:62, borderRadius:20, alignItems:'center', justifyContent:'center',
+                  style={{ width:60, height:60, borderRadius:20, alignItems:'center', justifyContent:'center',
                     backgroundColor: on ? C.gold + '1C' : C.surface,
                     borderWidth:2, borderColor: on ? C.gold : C.line }}>
-                  <Text style={{ fontSize:27 }}>{a.emoji}</Text>
+                  <Text style={{ fontSize:26 }}>{a.emoji}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-          <GoldButton label="Open my Bible" onPress={() => finish(true)}
-            loading={saving} style={{ marginTop:32, marginBottom:40 }} />
+          <GoldButton label="Continue" onPress={() => setStep(4)}
+            style={{ marginTop:28, marginBottom:40 }} />
         </ScrollView>
       </Animated.View>
     </View>
   );
+
+  // ── 4 · guided tour ──
+  if (step === 4) {
+    const t    = TOUR[tour];
+    const last = tour === TOUR.length - 1;
+    return (
+      <View style={{ flex:1, backgroundColor:C.abyss, paddingHorizontal:30, paddingTop:64 }}>
+        <View style={{ flexDirection:'row', gap:5, marginBottom:30 }}>
+          {TOUR.map((_, i) => (
+            <View key={i} style={{ flex:1, height:3, borderRadius:99,
+              backgroundColor: i <= tour ? C[t.tone] : C.line }} />
+          ))}
+        </View>
+
+        <Animated.View style={{ flex:1, opacity:fade }}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ width:58, height:58, borderRadius:19, alignItems:'center', justifyContent:'center',
+              backgroundColor: C[t.tone] + '16', borderWidth:1, borderColor: C[t.tone] + '3D' }}>
+              <Text style={{ fontSize:26 }}>{t.emoji}</Text>
+            </View>
+
+            <Text style={{ fontFamily:F.display, fontSize:30, color:C.text, marginTop:20, lineHeight:38 }}>
+              {t.title}
+            </Text>
+            <View style={{ height:1, width:46, backgroundColor: C[t.tone] + '66',
+              marginTop:13, marginBottom:15 }} />
+
+            {t.lines.map((l, i) => (
+              <Text key={i} style={{ fontFamily:F.body, fontSize:14.5, color:C.muted,
+                lineHeight:24, marginBottom:11 }}>{l}</Text>
+            ))}
+
+            <View style={{ marginTop:12, marginBottom:24 }}>
+              <TourDemo kind={t.demo} />
+            </View>
+          </ScrollView>
+        </Animated.View>
+
+        <View style={{ paddingBottom:36 }}>
+          <GoldButton
+            label={last ? 'Open my Bible' : 'Next'}
+            loading={last && saving}
+            onPress={() => last ? finish() : setTour(x => x + 1)}
+          />
+          <View style={{ flexDirection:'row', justifyContent:'space-between', marginTop:14 }}>
+            <TouchableOpacity onPress={() => tour > 0 ? setTour(x => x - 1) : setStep(3)}
+              hitSlop={{top:12,bottom:12,left:12,right:12}}>
+              <Text style={[S(C).muted, { fontSize:13.5 }]}>Back</Text>
+            </TouchableOpacity>
+            {!last && (
+              <TouchableOpacity onPress={finish} hitSlop={{top:12,bottom:12,left:12,right:12}}>
+                <Text style={[S(C).muted, { fontSize:13.5 }]}>Skip tour</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return null;
 }
@@ -3660,20 +4349,28 @@ function Onboarding({ firebaseUser, onDone }) {
 //  NAVIGATION
 // ═══════════════════════════════════════════════════════════════════
 const TABS = [
-  { id:'bible',   icon:'book',          label:'Bible'  },
-  { id:'plans',   icon:'albums',        label:'Plans'  },
-  { id:'groups',  icon:'people',        label:'Groups' },
-  { id:'alerts',  icon:'notifications', label:'Alerts' },
-  { id:'me',      icon:'person',        label:'Profile'},
+  { id:'bible',   icon:'book',          label:'Bible'   },
+  { id:'plans',   icon:'albums',        label:'Plans'   },
+  { id:'groups',  icon:'people',        label:'Groups'  },
+  { id:'alerts',  icon:'notifications', label:'Alerts'  },
+  { id:'me',      icon:'person',        label:'Profile' },
 ];
 const ROOT_TABS = TABS.map(t => t.id);
+
+// Every screen that legitimately hides the tab bar. Anything NOT in this
+// list and not a tab is an unknown route — it gets a real screen with a
+// way out, and keeps the tab bar visible so you can never get stranded.
+const SUB_SCREENS = [
+  'planDetail','planBuilder','planInvite','groupDetail','groupCreate',
+  'friends','userProfile','dm','prayer','studyRooms','history','settings',
+];
 
 function TabBar({ active, onNav, unread }) {
   const { C } = useSettings();
   return (
     <View style={{
       flexDirection:'row', alignItems:'center', justifyContent:'space-around',
-      paddingTop:9, paddingBottom:Platform.OS === 'ios' ? 24 : 11,
+      paddingTop:9, paddingBottom: Platform.OS === 'ios' ? 24 : 11,
       backgroundColor:C.deep, borderTopWidth:1, borderTopColor:C.hairline,
     }}>
       {TABS.map(t => {
@@ -3682,8 +4379,7 @@ function TabBar({ active, onNav, unread }) {
           <TouchableOpacity key={t.id} onPress={() => { Haptics.selectionAsync(); onNav(t.id); }}
             style={{ alignItems:'center', paddingHorizontal:9, minWidth:60 }}>
             <View>
-              <Ionicons name={on ? t.icon : `${t.icon}-outline`} size={22}
-                color={on ? C.gold : C.dim} />
+              <Ionicons name={on ? t.icon : `${t.icon}-outline`} size={22} color={on ? C.gold : C.dim} />
               {t.id === 'alerts' && unread > 0 && (
                 <View style={{ position:'absolute', top:-3, right:-6, minWidth:15, height:15,
                   borderRadius:8, backgroundColor:C.rose, alignItems:'center', justifyContent:'center',
@@ -3703,8 +4399,20 @@ function TabBar({ active, onNav, unread }) {
   );
 }
 
+function NotFoundScreen({ route, onBack, onHome }) {
+  return (
+    <Screen scroll>
+      <Header title="Nothing here" onBack={onBack} />
+      <Empty icon="🧭" title="That screen isn't built yet"
+        body={`We couldn't find "${route}". Nothing broke — you just found a road that isn't paved.`}
+        action={<GoldButton label="Back to my Bible" icon="book-outline" onPress={onHome} />}
+      />
+    </Screen>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
-//  ROOT
+//  SHELL
 // ═══════════════════════════════════════════════════════════════════
 function Shell({ fbUser, user, setUser, onSignOut }) {
   const { C } = useSettings();
@@ -3715,14 +4423,12 @@ function Shell({ fbUser, user, setUser, onSignOut }) {
   const [plans, setPlans]   = useState([]);
   const [unread, setUnread] = useState(0);
   const [offline, setOff]   = useState(false);
-  const [loadingData, setLD]= useState(false);
   const fade = useRef(new Animated.Value(1)).current;
 
-  // live user doc
   useEffect(() => {
     if (!fbUser?.uid) return;
     return onSnapshot(doc(db,'users',fbUser.uid), s => {
-      if (s.exists()) setUser({ uid: s.id, ...s.data() });
+      if (s.exists()) setUser({ uid:s.id, ...s.data() });
     }, () => {});
   }, [fbUser?.uid]);
 
@@ -3741,8 +4447,11 @@ function Shell({ fbUser, user, setUser, onSignOut }) {
 
   useEffect(() => {
     if (!user?.uid) return;
-    const q = query(collection(db,'notifications'), where('toUid','==',user.uid), where('read','==',false));
-    return onSnapshot(q, s => setUnread(s.size + (user?.pendingRequests || []).length), () => setUnread(0));
+    const q = query(collection(db,'notifications'),
+      where('toUid','==',user.uid), where('read','==',false));
+    return onSnapshot(q,
+      s => setUnread(s.size + (user?.pendingRequests || []).length),
+      () => setUnread((user?.pendingRequests || []).length));
   }, [user?.uid, user?.pendingRequests]);
 
   useEffect(() => NetInfo.addEventListener(s => setOff(!s.isConnected)), []);
@@ -3755,6 +4464,7 @@ function Shell({ fbUser, user, setUser, onSignOut }) {
       Animated.timing(fade, { toValue:1, duration:170, useNativeDriver:true }).start();
     });
   }
+
   function back() {
     const prev = stack[stack.length - 1];
     Animated.timing(fade, { toValue:0, duration:70, useNativeDriver:true }).start(() => {
@@ -3763,6 +4473,8 @@ function Shell({ fbUser, user, setUser, onSignOut }) {
       Animated.timing(fade, { toValue:1, duration:170, useNativeDriver:true }).start();
     });
   }
+
+  function home() { setStack([]); setParams({}); setScreen('bible'); }
 
   const todaysReading = useMemo(() => {
     for (const p of plans) {
@@ -3775,28 +4487,44 @@ function Shell({ fbUser, user, setUser, onSignOut }) {
 
   function render() {
     switch (screen) {
+      // ── tabs ──
       case 'bible':   return <BibleScreen user={user} onNav={nav} todaysReading={todaysReading} />;
-      case 'plans':   return <PlansScreen user={user} plans={plans} onNav={nav} loading={loadingData} />;
-      case 'groups':  return <GroupsScreen user={user} groups={groups} onNav={nav} loading={loadingData} />;
+      case 'plans':   return <PlansScreen user={user} plans={plans} onNav={nav} />;
+      case 'groups':  return <GroupsScreen user={user} groups={groups} onNav={nav} />;
       case 'alerts':  return <NotificationsScreen user={user} onNav={nav} />;
       case 'me':      return <ProfileScreen user={user} onNav={nav} onSignOut={onSignOut} />;
 
+      // ── plans ──
       case 'planDetail':  return <PlanDetailScreen plan={params.plan} user={user} onBack={back} onNav={nav} />;
       case 'planBuilder': return <PlanBuilderScreen plan={params.plan} user={user} groups={groups}
-                                   onBack={back} onDone={() => nav('plans')} />;
+                                   onBack={back} onDone={() => { setStack([]); nav('plans'); }} />;
+      case 'planInvite':  return <PlanInviteScreen plan={params.plan} user={user} onBack={back} />;
+
+      // ── groups ──
       case 'groupDetail': return <GroupDetailScreen group={params.group} user={user} onBack={back} onNav={nav} />;
       case 'groupCreate': return <GroupCreateScreen user={user} onBack={back}
-                                   onDone={code => { nav('groups'); setTimeout(() =>
-                                     Alert.alert('Group created', `Invite code: ${code}\n\nShare it with whoever you want in.`), 350); }} />;
+                                   onDone={code => { setStack([]); nav('groups'); setTimeout(() =>
+                                     Alert.alert('Group created',
+                                       `Invite code: ${code}\n\nShare it with whoever you want in.`), 350); }} />;
+
+      // ── people ──
       case 'friends':     return <FriendsScreen user={user} onBack={back} onNav={nav} />;
-      case 'userProfile': return <UserProfileScreen uid={params.uid} user={user} onBack={back} onNav={nav} />;
-      case 'prayer':      return <PrayerScreen user={user} onBack={back} seedVerse={params.verse ? params : null} />;
+      case 'userProfile': return <UserProfileScreen uid={params.uid} user={user} groups={groups}
+                                   onBack={back} onNav={nav} />;
+      case 'dm':          return <DirectMessageScreen uid={params.uid} user={user} onBack={back} />;
+
+      // ── profile hub ──
+      case 'prayer':      return <PrayerScreen user={user} onBack={back}
+                                   seedVerse={params.verse ? params : null} />;
       case 'studyRooms':  return <StudyRoomsScreen user={user} onBack={back} onNav={nav} />;
       case 'history':     return <HistoryScreen user={user} onBack={back} onNav={nav} />;
       case 'settings':    return <SettingsScreen user={user} onBack={back} onSignOut={onSignOut} />;
-      default:            return <BibleScreen user={user} onNav={nav} todaysReading={todaysReading} />;
+
+      default:            return <NotFoundScreen route={screen} onBack={back} onHome={home} />;
     }
   }
+
+  const showTabs = ROOT_TABS.includes(screen) || !SUB_SCREENS.includes(screen);
 
   return (
     <View style={{ flex:1, backgroundColor:C.abyss }}>
@@ -3808,16 +4536,19 @@ function Shell({ fbUser, user, setUser, onSignOut }) {
         </View>
       )}
       <Animated.View style={{ flex:1, opacity:fade }}>{render()}</Animated.View>
-      {ROOT_TABS.includes(screen) && <TabBar active={screen} onNav={nav} unread={unread} />}
+      {showTabs && <TabBar active={screen} onNav={nav} unread={unread} />}
     </View>
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  ROOT
+// ═══════════════════════════════════════════════════════════════════
 export default function App() {
-  const [fbUser, setFbUser]       = useState(null);
-  const [user, setUser]           = useState(null);
-  const [booting, setBooting]     = useState(true);
-  const [needsSetup, setNeeds]    = useState(false);
+  const [fbUser, setFbUser]    = useState(null);
+  const [user, setUser]        = useState(null);
+  const [booting, setBooting]  = useState(true);
+  const [needsSetup, setNeeds] = useState(false);
   const setupRef = useRef(false);
 
   const [fontsLoaded] = useFonts({
